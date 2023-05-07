@@ -80,7 +80,12 @@ while cap.isOpened():
 
         # calculating the distance measure
         inv = (pred[ymed][xmed])*0.001
-        distance = str(round(1/inv,2))
+        d = round(1/inv,2)
+        
+        # calculating actual distance value
+        a = 0.12083143236283
+        b = 3.78645050159133
+        distance = str(round(a*d + b,1))
 
         # bounding box
         cv2.rectangle(frame, (x0, y0), (x1, y1), color, 1)
