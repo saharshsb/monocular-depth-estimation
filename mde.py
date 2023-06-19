@@ -1,18 +1,42 @@
 from roboflow import Roboflow
 import cv2
-import torch
+import torch,os
 import pandas as pd
 import numpy
 import matplotlib.pyplot as plt
+import yaml
+import pickle
+from LinearRegressionModel import LinearRegressionModel 
 
 # load the custom training YOLOv5 model
 rf = Roboflow(api_key="LQk9XApDNPy9UBWO6j3l")
 project = rf.workspace().project("miyo")
 model = project.version(4).model
 
+# Create an instance of the linear regression model
+linear = LinearRegressionModel()
+
+# Load the state dictionary from the file
+
+try:
+    state_dict=torch.load("C:\\Users\\namit\\OneDrive\\Desktop\\monocular\\weights.pt")
+    print(type(state_dict))
+except Exception as e:
+    print(f"An error occurred while loading the state dictionary: {e}")
+
+
+
+# Set the state dictionary to the linear regression model
+linear.load_state_dict(state_dict)
+print(state_dict)
+
+# Set the model to evaluation mode
+linear.eval()
+
+
 # load the pre-trained MiDaS model
 midas = torch.hub.load('intel-isl/MiDaS', 'DPT_Large')
-midas.to('cuda')
+midas.to('cpu')
 midas.eval()
 
 transforms = torch.hub.load('intel-isl/MiDaS', 'transforms')
@@ -26,7 +50,13 @@ frame_width = int(cap.get(3))
 frame_height = int(cap.get(4))
 
 # create an object to write the frames to output file
-out = cv2.VideoWriter("output_test.mp4",cv2.VideoWriter_fourcc(*'MP4V'), 30, (frame_width,frame_height))
+out = cv2.VideoWriter("output_test.mp4",cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 30, (frame_width,frame_height))
+
+#Accessing configuration file
+with open('config.yml') as file:
+    list = yaml.load(file, Loader=yaml.FullLoader)
+
+
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -36,7 +66,7 @@ while cap.isOpened():
 
     # MiDaS
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    imgbatch = transform(img).to('cuda')
+    imgbatch = transform(img).to('cpu')
 
     with torch.no_grad():
         prediction = midas(imgbatch)
@@ -71,22 +101,19 @@ while cap.isOpened():
         print('x = ',xmed,'y = ',ymed)
 
         # colors for various classes
-        if label == 'car':
-            color = (0,255,0)
-        elif label == 'pedestrian':
-            color = (0,0,255)
-        elif label == 'truck':
-            color = (255,0,0)
+        if label in list :
+            color=eval(list[label])
+           
 
         # calculating the distance measure
-        inv = (pred[ymed][xmed])*0.001
-        d = round(1/inv,2)
-        
-        # calculating actual distance value
-        a = 0.12083143236283
-        b = 3.78645050159133
-        distance = str(round(a*d + b,1))
-
+        inv = (pred[ymed][xmed])
+        '''distance = str(round(1/inv,2))'''
+        X=[inv,xmed,ymed]
+        Val=torch.Tensor(X)
+        with torch.inference_mode():
+               linear_pred = linear(Val)   
+        distance_list=linear_pred.tolist()
+        distance=distance_list[0]
         # bounding box
         cv2.rectangle(frame, (x0, y0), (x1, y1), color, 1)
 
