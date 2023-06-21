@@ -57,10 +57,10 @@ out = cv2.VideoWriter("output_480p.mp4",cv2.VideoWriter_fourcc(*'MP4V'), 60, (fr
 # accessing configuration file
 with open('config.yml') as file:
     list = yaml.load(file, Loader=yaml.FullLoader)
-
+print(list)
 count = 0
 
-mot_tracker = Sort() #
+mot_tracker = Sort()
 
 while cap.isOpened():
     # start counter
@@ -71,7 +71,6 @@ while cap.isOpened():
     # YOLO
     result = model(frame)
     output = result.pandas().xyxy[0]
-    print(output)
 
     detections = result.pred[0].numpy() #
     track_bbs_ids = mot_tracker.update(detections) #
@@ -120,10 +119,10 @@ while cap.isOpened():
         # extract label and confidence information
         label = str(obj[1]['name'])
         conf = str(round(obj[1]['confidence'], 2))
-
+    
         # colors for various classes
-        if label in list:
-            color=eval(list[label])
+        if label in list['Color'] and obj[1]['confidence']>=list['Threshold']['Confidence']:
+            color=eval(list['Color'][label])
 
             # calculating the distance measure
             inv = (pred[ymed][xmed])*0.001
@@ -142,10 +141,15 @@ while cap.isOpened():
             cv2.rectangle(frame, (x0, y0), (x1, y1), color, 1)
 
             # text box
-            text_size, _ = cv2.getTextSize(label+' '+distance+'m '+id, cv2.FONT_HERSHEY_PLAIN, 1, 1)
+            text_size, _ = cv2.getTextSize(label+' '+distance+'m ', cv2.FONT_HERSHEY_PLAIN, 1, 1)
+            text_size2, _ = cv2.getTextSize('ID: '+id, cv2.FONT_HERSHEY_PLAIN, 1, 1)
+
             text_width, text_height = text_size
-            cv2.rectangle(frame, (x0, y0), (x0+text_width, y0-text_height-10), color, -1)
-            cv2.putText(frame, label+' '+distance+'m '+id, (x0, y0-10), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
+            text_width2, text_height2 = text_size2
+            cv2.rectangle(frame, (x0, y0), (x0+text_width, y0-text_height-5), color, -1)
+            cv2.putText(frame, label+' '+distance+'m ', (x0, y0-5), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
+            cv2.rectangle(frame, (x1-text_width2, y1), (x1, y1-text_height2-5), color, -1)
+            cv2.putText(frame, 'ID: '+id, (x1-text_width2, y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
 
     end = time.perf_counter()
 

@@ -1,3 +1,6 @@
-Car: (0,255,0)
-Pedestrian: (0,128,255)
+Color:
+  Car: (0,255,0)
+  Pedestrian: (0,128,255)
 
+Threshold:
+  Confidence: 0.5
