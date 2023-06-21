@@ -12,6 +12,7 @@ import yaml
 import time
 import json
 from LinearRegressionModel import LinearRegressionModel
+from sort import *
 
 
 if torch.cuda.is_available(): 
@@ -45,7 +46,6 @@ linear.eval()
 
 # capture the input (0 for webcam)
 cap = cv2.VideoCapture("input_480p.mp4")
-# cap = cv2.VideoCapture("D:\\NEW\\ML_Projects\\Dataset\\ground_truth\\%04d.jpg", cv2.CAP_IMAGES)
 
 # get the width and height of captured frame
 frame_width = int(cap.get(3))
@@ -59,6 +59,9 @@ with open('config.yml') as file:
     list = yaml.load(file, Loader=yaml.FullLoader)
 
 count = 0
+
+mot_tracker = Sort() #
+
 while cap.isOpened():
     # start counter
     start = time.perf_counter()
@@ -68,6 +71,10 @@ while cap.isOpened():
     # YOLO
     result = model(frame)
     output = result.pandas().xyxy[0]
+    print(output)
+
+    detections = result.pred[0].numpy() #
+    track_bbs_ids = mot_tracker.update(detections) #
 
     # MiDaS
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -96,6 +103,17 @@ while cap.isOpened():
         else:
             continue
         
+        min = 10000
+        for j in range(len(track_bbs_ids.tolist())): #
+            coords = track_bbs_ids.tolist()[j]
+            x2,y2,x3,y3 = int(coords[0]), int(coords[1]), int(coords[2]), int(coords[3]),
+            id_x = int(coords[4])
+
+            diff = abs(x0-x2)+abs(y0-y2)+abs(x1-x3)+abs(y1-y3)
+            if diff<min:
+                min = diff
+                id = str(id_x)
+
         xmed = int((x1 + x0)/2)
         ymed = int((y1 + y0)/2)
 
@@ -124,10 +142,10 @@ while cap.isOpened():
             cv2.rectangle(frame, (x0, y0), (x1, y1), color, 1)
 
             # text box
-            text_size, _ = cv2.getTextSize(label+' '+distance+'m', cv2.FONT_HERSHEY_PLAIN, 1, 1)
+            text_size, _ = cv2.getTextSize(label+' '+distance+'m '+id, cv2.FONT_HERSHEY_PLAIN, 1, 1)
             text_width, text_height = text_size
             cv2.rectangle(frame, (x0, y0), (x0+text_width, y0-text_height-10), color, -1)
-            cv2.putText(frame, label+' '+distance+'m', (x0, y0-10), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
+            cv2.putText(frame, label+' '+distance+'m '+id, (x0, y0-10), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
 
     end = time.perf_counter()
 
