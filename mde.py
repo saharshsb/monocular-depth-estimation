@@ -1,72 +1,77 @@
+import sys
+sys.path.append('C:\\Users\\sahar\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python310\\site-packages\\')
+
 from roboflow import Roboflow
 import cv2
-import torch,os
+import torch
 import pandas as pd
 import numpy
 import matplotlib.pyplot as plt
+import math
 import yaml
-import pickle
-from LinearRegressionModel import LinearRegressionModel 
+import time
+import json
+from LinearRegressionModel import LinearRegressionModel
 
-# load the custom training YOLOv5 model
-rf = Roboflow(api_key="LQk9XApDNPy9UBWO6j3l")
-project = rf.workspace().project("miyo")
-model = project.version(4).model
 
-# Create an instance of the linear regression model
+if torch.cuda.is_available(): 
+    dev = "cuda:0" 
+else: 
+    dev = "cpu" 
+device = torch.device(dev)
+
+model = torch.hub.load('ultralytics/yolov5','custom','best.pt',verbose=False,device=dev)
+
+# load the pre-trained MiDaS model
+midas = torch.hub.load('intel-isl/MiDaS', 'MiDaS_small',verbose=False,device=dev)
+midas.to(device)
+midas.eval()
+
+transforms = torch.hub.load('intel-isl/MiDaS', 'transforms',verbose=False)
+transform = transforms.small_transform
+
+# load the regression model
 linear = LinearRegressionModel()
-
-# Load the state dictionary from the file
-
 try:
-    state_dict=torch.load("C:\\Users\\namit\\OneDrive\\Desktop\\monocular\\weights.pt")
-    print(type(state_dict))
+    state_dict = torch.load("C:\\Users\HP\\Desktop\\monocular_depth_estimation\\final\\one_new.pt")
 except Exception as e:
     print(f"An error occurred while loading the state dictionary: {e}")
 
-
-
 # Set the state dictionary to the linear regression model
 linear.load_state_dict(state_dict)
-print(state_dict)
 
 # Set the model to evaluation mode
 linear.eval()
 
-
-# load the pre-trained MiDaS model
-midas = torch.hub.load('intel-isl/MiDaS', 'DPT_Large')
-midas.to('cpu')
-midas.eval()
-
-transforms = torch.hub.load('intel-isl/MiDaS', 'transforms')
-transform = transforms.dpt_transform
-
 # capture the input (0 for webcam)
-cap = cv2.VideoCapture("input.mp4")
+cap = cv2.VideoCapture("input_480p.mp4")
+# cap = cv2.VideoCapture("D:\\NEW\\ML_Projects\\Dataset\\ground_truth\\%04d.jpg", cv2.CAP_IMAGES)
 
 # get the width and height of captured frame
 frame_width = int(cap.get(3))
 frame_height = int(cap.get(4))
 
 # create an object to write the frames to output file
-out = cv2.VideoWriter("output_test.mp4",cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), 30, (frame_width,frame_height))
+out = cv2.VideoWriter("output_480p.mp4",cv2.VideoWriter_fourcc(*'MP4V'), 60, (frame_width,frame_height))
 
-#Accessing configuration file
+# accessing configuration file
 with open('config.yml') as file:
     list = yaml.load(file, Loader=yaml.FullLoader)
 
-
-
+count = 0
 while cap.isOpened():
+    # start counter
+    start = time.perf_counter()
+
     ret, frame = cap.read()
 
     # YOLO
-    output = model.predict(frame).json()
+    result = model(frame)
+    output = result.pandas().xyxy[0]
 
     # MiDaS
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    imgbatch = transform(img).to('cpu')
+    imgbatch = transform(img).to(device)
 
     with torch.no_grad():
         prediction = midas(imgbatch)
@@ -80,50 +85,57 @@ while cap.isOpened():
         pred = prediction.cpu().numpy()
 
     # YOLO
-    for obj in output['predictions']:
+    for obj in output.iterrows():
         # if there is a prediction
-        if output['predictions']:
-            xmed = int(obj['x'])
-            ymed = int(obj['y'])
+        if obj[1]['name']:
+            # calculating coordinates of bounding boxes by extracting x, y value information
+            x0 = int(obj[1]['xmin'])
+            y0 = int(obj[1]['ymin'])
+            x1 = int(obj[1]['xmax'])
+            y1 = int(obj[1]['ymax'])
         else:
             continue
         
-        # calculating coordinates of bounding boxes by extracting x, y value information
-        x0 = xmed - int(int(obj['width'])/2)
-        y0 = ymed - int(int(obj['height'])/2)
-        x1 = xmed + int(int(obj['width'])/2)
-        y1 = ymed + int(int(obj['height'])/2)
+        xmed = int((x1 + x0)/2)
+        ymed = int((y1 + y0)/2)
 
         # extract label and confidence information
-        label = str(obj['class'])
-        conf = str(round(obj['confidence'], 2))
-
-        print('x = ',xmed,'y = ',ymed)
+        label = str(obj[1]['name'])
+        conf = str(round(obj[1]['confidence'], 2))
 
         # colors for various classes
-        if label in list :
+        if label in list:
             color=eval(list[label])
-           
 
-        # calculating the distance measure
-        inv = (pred[ymed][xmed])
-        '''distance = str(round(1/inv,2))'''
-        X=[inv,xmed,ymed]
-        Val=torch.Tensor(X)
-        with torch.inference_mode():
-               linear_pred = linear(Val)   
-        distance_list=linear_pred.tolist()
-        distance=distance_list[0]
-        # bounding box
-        cv2.rectangle(frame, (x0, y0), (x1, y1), color, 1)
-
-        # text box
-        text_size, _ = cv2.getTextSize(label+' dist:'+distance, cv2.FONT_HERSHEY_PLAIN, 1, 1)
-        text_width, text_height = text_size
-        cv2.rectangle(frame, (x0, y0), (x0+text_width, y0-text_height-10), color, -1)
-        cv2.putText(frame, label+' dist:'+distance, (x0, y0-10), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
+            # calculating the distance measure
+            inv = (pred[ymed][xmed])*0.001
+            inv = round(1/inv,2)
+            X = [inv,xmed,ymed]
+            Val = torch.Tensor(X)
+            with torch.inference_mode():
+                linear_pred = linear(Val)   
+            distance_list = linear_pred.tolist()
+            distance = distance_list[0]
+            distance = round(distance,1)
         
-        # display the frame and save it to file
+            distance = str(distance)
+
+            # bounding box
+            cv2.rectangle(frame, (x0, y0), (x1, y1), color, 1)
+
+            # text box
+            text_size, _ = cv2.getTextSize(label+' '+distance+'m', cv2.FONT_HERSHEY_PLAIN, 1, 1)
+            text_width, text_height = text_size
+            cv2.rectangle(frame, (x0, y0), (x0+text_width, y0-text_height-10), color, -1)
+            cv2.putText(frame, label+' '+distance+'m', (x0, y0-10), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 0), 1, cv2.LINE_AA)
+
+    end = time.perf_counter()
+
+    totaltime = end - start
+    fps = 1 / totaltime
+    cv2.putText(frame, 'FPS: '+str(int(fps)), (20,70), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0,255,0), 2)
+    
+    # display the frame and save it to file
     cv2.imshow("Depth Estimation",frame)
     out.write(frame)
 
